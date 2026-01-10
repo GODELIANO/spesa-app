@@ -1,6 +1,5 @@
 // =========================
-// Spesa App - app.js (improved categorization)
-// Features: delete, auto categories+grouping, qty +/- , share, wake lock, offline
+// Spesa App - app.js (learning categories via aliases)
 // =========================
 
 // ---- DOM ----
@@ -9,25 +8,27 @@ const input = document.getElementById("input");
 const listEl = document.getElementById("list");
 const clearDoneBtn = document.getElementById("clearDone");
 const clearAllBtn = document.getElementById("clearAll");
-const shareBtn = document.getElementById("shareList");     // opzionale se HTML non aggiornato
-const keepAwakeBtn = document.getElementById("keepAwake"); // opzionale se HTML non aggiornato
+const shareBtn = document.getElementById("shareList");       // opzionale
+const keepAwakeBtn = document.getElementById("keepAwake");   // opzionale
+const recatAllBtn = document.getElementById("recatAll");     // opzionale (ma consigliato)
 
 if (!form || !input || !listEl || !clearDoneBtn || !clearAllBtn) {
-  console.log({ form, input, listEl, clearDoneBtn, clearAllBtn, shareBtn, keepAwakeBtn });
+  console.log({ form, input, listEl, clearDoneBtn, clearAllBtn, shareBtn, keepAwakeBtn, recatAllBtn });
   throw new Error("Mancano uno o più elementi base in index.html (ID).");
 }
 
 const STORAGE_KEY = "spesa_items_v2";
+const ALIASES_KEY = "spesa_aliases_v1";
 
 // -------------------------
-// Text normalization + tokenization + light Italian stemming
+// Text normalization + tokenization + light IT stemming
 // -------------------------
 function normalizeText(s) {
   return (s || "")
     .toLowerCase()
-    .normalize("NFD")                  // separa accenti
-    .replace(/[\u0300-\u036f]/g, "")   // rimuove accenti
-    .replace(/[^\p{L}\p{N}\s]/gu, " ") // rimuove punteggiatura (unicode-safe)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -37,26 +38,10 @@ function tokenize(s) {
   return t ? t.split(" ") : [];
 }
 
-// Stemmer leggero IT: mira alla spesa (non linguistica perfetta).
-// Obiettivo: ridurre plurali e varianti comuni a una radice stabile.
 function stemIt(word) {
-  let w = (word || "").toLowerCase();
-
-  // rimuovi apostrofi residui
-  w = w.replace(/'/g, "");
-
-  // normalizza articoli agganciati tipo "lacqua" da "l'acqua" (già ripulito in normalizeText)
-  // qui non facciamo split extra: lo gestiamo con tokenizzazione.
-
-  // tagli molto comuni (plurali)
-  // mele -> mel, pomodori -> pomodor, carote -> carot, banane -> banan
-  if (w.length > 3) w = w.replace(/(i|e)$/i, "");
-
-  // gestisci -che/-ghe (es. "pesche" -> "pesc" dopo taglio e -> "pesch" poi che->c)
+  let w = (word || "").toLowerCase().replace(/'/g, "");
+  if (w.length > 3) w = w.replace(/(i|e)$/i, ""); // plurali
   w = w.replace(/che$/i, "c").replace(/ghe$/i, "g");
-
-  // riduzioni finali molto comuni (facoltative, conservative)
-  // es: "mozzarell" resta ok, "parmigian" ok.
   return w;
 }
 
@@ -65,108 +50,115 @@ function stemsFromText(text) {
 }
 
 // -------------------------
-// 4) Categorie automatiche: match su stems
+// 4) Categories (rules)
 // -------------------------
 const CATEGORIES = [
-  {
-    key: "produce",
-    label: "Frutta & Verdura",
-    icon: "🥬",
-    stems: [
-      "insalat","lattug","rucol","pomodor","zucchin","melanzan","patat","carot","cipoll","agli",
-      "limon","banan","mel","per","fragol","kiw","ananas","aranc","mandarin","cetriol","peperon",
-      "broccol","cavolfior","spinac","fung","zener","zuccherin", "verdur", "frutt"
-    ],
+  { key: "produce",   label: "Frutta & Verdura", icon: "🥬",
+    stems: ["insalat","lattug","rucol","pomodor","zucchin","melanzan","patat","carot","cipoll","agli","limon","banan","mel","per","fragol","ananas","aranc","mandarin","cetriol","peperon","broccol","cavolfior","spinac","fung","verdur","frutt"]
   },
-  {
-    key: "meat",
-    label: "Carne",
-    icon: "🥩",
-    stems: ["carn","poll","tacchin","manz","vitell","maial","bistec","salsicc","prosciutt","salam","wurstel","bacon","speck"],
+  { key: "meat",      label: "Carne",            icon: "🥩",
+    stems: ["carn","poll","tacchin","manz","vitell","maial","bistec","salsicc","prosciutt","salam","wurstel","bacon","speck"]
   },
-  {
-    key: "fish",
-    label: "Pesce",
-    icon: "🐟",
-    stems: ["pesc","tonn","salm","merluzz","gamber","calamar","vongol","orat","branzin","acciugh","sard"],
+  { key: "fish",      label: "Pesce",            icon: "🐟",
+    stems: ["pesc","tonn","salm","merluzz","gamber","calamar","vongol","orat","branzin","acciugh","sard"]
   },
-  {
-    key: "dairy",
-    label: "Latticini",
-    icon: "🥛",
-    stems: ["latt","yogurt","burr","pann","mozzarell","ricott","parmigian","gran","formagg","latte","kefir"],
+  { key: "dairy",     label: "Latticini",        icon: "🥛",
+    stems: ["latt","yogurt","burr","pann","mozzarell","ricott","parmigian","gran","formagg","kefir"]
   },
-  {
-    key: "bakery",
-    label: "Pane & Forno",
-    icon: "🥖",
-    stems: ["pan","panin","focacc","pizz","cracker","biscott","cornett","farin","lievit","grissin","brioch"],
+  { key: "bakery",    label: "Pane & Forno",     icon: "🥖",
+    stems: ["pan","panin","focacc","pizz","cracker","biscott","cornett","farin","lievit","grissin","brioch"]
   },
-  {
-    key: "pantry",
-    label: "Dispensa",
-    icon: "🫙",
-    stems: ["past","ris","oli","acet","sal","zuccher","caffe","te","leggum","cec","lent","fagiol","sug","passat","pelat","spezi","tonn","conserv","brod"],
+  { key: "pantry",    label: "Dispensa",         icon: "🫙",
+    stems: ["past","ris","oli","acet","sal","zuccher","caffe","te","leggum","cec","lent","fagiol","sug","passat","pelat","spezi","conserv","brod"]
   },
-  {
-    key: "frozen",
-    label: "Surgelati",
-    icon: "🧊",
-    stems: ["surgelat","gelat","frozen","pisell","bastonc","spinac"],
+  { key: "frozen",    label: "Surgelati",        icon: "🧊",
+    stems: ["surgelat","gelat","frozen","pisell","bastonc"]
   },
-  {
-    key: "household",
-    label: "Casa",
-    icon: "🧽",
-    stems: ["detersiv","sapon","candeggin","spugn","cart","igienic","scottex","sacchett","lavastovigl","ammorbident","pulitor","sgrassator","spazzol","guant"],
+  { key: "household", label: "Casa",             icon: "🧽",
+    stems: ["detersiv","sapon","candeggin","spugn","cart","igienic","scottex","sacchett","lavastovigl","ammorbident","pulitor","sgrassator","guant"]
   },
-  {
-    key: "personal",
-    label: "Persona",
-    icon: "🧴",
-    stems: ["shampoo","bagnoschium","deodorant","dentifric","spazzolin","raso","crem","sapone","cotton","assorbent"],
+  { key: "personal",  label: "Persona",          icon: "🧴",
+    stems: ["shampoo","bagnoschium","deodorant","dentifric","spazzolin","raso","crem","assorbent"]
   },
-  {
-    key: "pet",
-    label: "Animali",
-    icon: "🐾",
-    stems: ["crocchett","lettier","gatt","can","mangim","snack"],
+  { key: "pet",       label: "Animali",          icon: "🐾",
+    stems: ["crocchett","lettier","gatt","can","mangim","snack"]
   },
-  {
-    key: "other",
-    label: "Altro",
-    icon: "📝",
-    stems: [],
-  },
+  { key: "other",     label: "Altro",            icon: "📝", stems: [] },
 ];
 
 function catMeta(key) {
   return CATEGORIES.find((c) => c.key === key) || CATEGORIES[CATEGORIES.length - 1];
 }
 
-// Matching più tollerante: exact OR prefix match (in entrambe le direzioni).
-function stemMatchesCategoryStem(tokenStem, categoryStem) {
+function stemMatches(tokenStem, categoryStem) {
   if (!tokenStem || !categoryStem) return false;
   if (tokenStem === categoryStem) return true;
-  // tolleranza: "pomodor" matcha "pomodor", ma anche "pomodoro" -> "pomodor"
   if (tokenStem.startsWith(categoryStem)) return true;
   if (categoryStem.startsWith(tokenStem) && tokenStem.length >= 4) return true;
   return false;
 }
 
-function inferCategory(text) {
-  const stems = stemsFromText(text);
+// -------------------------
+// ✅ Learning: Aliases
+// -------------------------
+let aliases = loadAliases();
 
+function loadAliases() {
+  try {
+    const raw = localStorage.getItem(ALIASES_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return (parsed && typeof parsed === "object") ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistAliases() {
+  localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases));
+}
+
+// Regola conservativa:
+// - salva sempre alias per l'intera frase normalizzata
+// - se è una sola parola, salva anche alias per quella parola
+function learnAlias(text, categoryKey) {
+  const norm = normalizeText(text);
+  if (!norm) return;
+  aliases[`p:${norm}`] = categoryKey; // phrase
+  const toks = tokenize(norm);
+  if (toks.length === 1) {
+    aliases[`w:${toks[0]}`] = categoryKey; // single word
+  }
+  persistAliases();
+}
+
+// Consulta alias prima delle regole
+function aliasCategory(text) {
+  const norm = normalizeText(text);
+  if (!norm) return null;
+  const phraseKey = `p:${norm}`;
+  if (aliases[phraseKey]) return aliases[phraseKey];
+
+  const toks = tokenize(norm);
+  if (toks.length === 1) {
+    const wordKey = `w:${toks[0]}`;
+    if (aliases[wordKey]) return aliases[wordKey];
+  }
+  return null;
+}
+
+// inferCategory: alias -> regole
+function inferCategory(text) {
+  const fromAlias = aliasCategory(text);
+  if (fromAlias) return fromAlias;
+
+  const stems = stemsFromText(text);
   for (const c of CATEGORIES) {
     if (c.key === "other") continue;
-    if (!c.stems || c.stems.length === 0) continue;
+    if (!c.stems?.length) continue;
 
     for (const s of stems) {
       if (s.length < 3) continue;
-      // se QUALSIASI stem dell'item matcha QUALSIASI stem della categoria -> match
-      if (c.stems.some((cs) => stemMatchesCategoryStem(s, cs))) {
-        return c.key;
-      }
+      if (c.stems.some((cs) => stemMatches(s, cs))) return c.key;
     }
   }
   return "other";
@@ -188,7 +180,6 @@ function loadItems() {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    // migrazione campi mancanti
     return parsed.map((i) => ({
       id: i.id ?? makeId(),
       text: String(i.text ?? ""),
@@ -203,7 +194,7 @@ function loadItems() {
 }
 
 // -------------------------
-// 4) Raggruppamento per categoria (ordine = CATEGORIES)
+// Grouping
 // -------------------------
 function groupItems(arr) {
   const order = new Map(CATEGORIES.map((c, idx) => [c.key, idx]));
@@ -215,19 +206,13 @@ function groupItems(arr) {
     buckets.get(k).push(it);
   }
 
-  // ordina per inserimento (createdAt)
-  for (const [, itemsArr] of buckets) {
-    itemsArr.sort((a, b) => a.createdAt - b.createdAt);
-  }
+  for (const [, itemsArr] of buckets) itemsArr.sort((a, b) => a.createdAt - b.createdAt);
 
-  // ordina i gruppi secondo CATEGORIES
-  return [...buckets.entries()].sort((a, b) => {
-    return (order.get(a[0]) ?? 999) - (order.get(b[0]) ?? 999);
-  });
+  return [...buckets.entries()].sort((a, b) => (order.get(a[0]) ?? 999) - (order.get(b[0]) ?? 999));
 }
 
 // -------------------------
-// 5) Parsing quantità da input
+// Qty parsing
 // -------------------------
 function clampQty(n) {
   if (!Number.isFinite(n)) return 1;
@@ -236,28 +221,17 @@ function clampQty(n) {
 
 function parseQty(raw) {
   const t = raw.trim();
-
-  // "latte x2" / "latte ×2"
   const m1 = t.match(/^(.*?)(?:\s*[x×]\s*)(\d{1,2})\s*$/i);
-  if (m1) {
-    const text = m1[1].trim();
-    const qty = clampQty(parseInt(m1[2], 10));
-    return { text: text || raw, qty };
-  }
+  if (m1) return { text: (m1[1].trim() || raw), qty: clampQty(parseInt(m1[2], 10)) };
 
-  // "latte 2" (numero finale)
   const m2 = t.match(/^(.*?)(?:\s+)(\d{1,2})\s*$/);
-  if (m2) {
-    const text = m2[1].trim();
-    const qty = clampQty(parseInt(m2[2], 10));
-    return { text: text || raw, qty };
-  }
+  if (m2) return { text: (m2[1].trim() || raw), qty: clampQty(parseInt(m2[2], 10)) };
 
   return { text: raw, qty: 1 };
 }
 
 // -------------------------
-// Stato + boot
+// State + boot
 // -------------------------
 let items = loadItems();
 render();
@@ -282,14 +256,33 @@ function toggleDone(id) {
 function changeQty(id, delta) {
   const it = items.find((i) => i.id === id);
   if (!it) return;
-  const next = (it.qty ?? 1) + delta;
-  it.qty = clampQty(next);
+  it.qty = clampQty((it.qty ?? 1) + delta);
+  persist();
+  render();
+}
+
+// Cambia categoria manualmente e “impara”
+function setCategory(id, categoryKey) {
+  const it = items.find((i) => i.id === id);
+  if (!it) return;
+  it.category = categoryKey;
+  learnAlias(it.text, categoryKey);
+  persist();
+  render();
+}
+
+// Ricategorizza tutto (usa alias -> regole)
+function recategorizeAll() {
+  items = items.map((it) => ({
+    ...it,
+    category: inferCategory(it.text),
+  }));
   persist();
   render();
 }
 
 // -------------------------
-// Eventi: aggiunta / clear
+// Events
 // -------------------------
 form.addEventListener("submit", (e) => {
   e.preventDefault();
@@ -325,8 +318,12 @@ clearAllBtn.addEventListener("click", () => {
   render();
 });
 
+if (recatAllBtn) {
+  recatAllBtn.addEventListener("click", () => recategorizeAll());
+}
+
 // -------------------------
-// 6) Condivisione (se bottone c'è)
+// Share (optional)
 // -------------------------
 if (shareBtn) {
   shareBtn.addEventListener("click", async () => {
@@ -355,15 +352,13 @@ function buildShareText() {
   for (const [catKey, arr] of grouped) {
     const m = catMeta(catKey);
     out += `\n${m.icon} ${m.label}\n`;
-    for (const it of arr) {
-      out += `- ${it.text}${it.qty > 1 ? ` ×${it.qty}` : ""}\n`;
-    }
+    for (const it of arr) out += `- ${it.text}${it.qty > 1 ? ` ×${it.qty}` : ""}\n`;
   }
   return out.trim();
 }
 
 // -------------------------
-// 7) Modalità negozio (Wake Lock) - se bottone c'è
+// Wake Lock (optional)
 // -------------------------
 let wakeLock = null;
 
@@ -425,7 +420,6 @@ function render() {
 
   const groupedOpen = groupItems(open);
 
-  // gruppi aperti
   for (const [catKey, arr] of groupedOpen) {
     const m = catMeta(catKey);
     const header = document.createElement("li");
@@ -433,12 +427,9 @@ function render() {
     header.textContent = `${m.icon} ${m.label}`;
     listEl.appendChild(header);
 
-    for (const it of arr) {
-      listEl.appendChild(renderItem(it));
-    }
+    for (const it of arr) listEl.appendChild(renderItem(it));
   }
 
-  // separatore spuntati
   if (done.length > 0) {
     const sep = document.createElement("li");
     sep.className = "cat-sep";
@@ -446,9 +437,7 @@ function render() {
     listEl.appendChild(sep);
 
     done.sort((a, b) => a.createdAt - b.createdAt);
-    for (const it of done) {
-      listEl.appendChild(renderItem(it));
-    }
+    for (const it of done) listEl.appendChild(renderItem(it));
   }
 
   input.focus();
@@ -467,6 +456,7 @@ function renderItem(it) {
   span.className = "text";
   span.textContent = it.text;
 
+  // quantità
   const qtyWrap = document.createElement("div");
   qtyWrap.className = "qty";
 
@@ -490,6 +480,19 @@ function renderItem(it) {
   qtyWrap.appendChild(qty);
   qtyWrap.appendChild(plus);
 
+  // ✅ menu categoria (manuale -> salva alias)
+  const select = document.createElement("select");
+  select.className = "cat-select";
+  for (const c of CATEGORIES) {
+    const opt = document.createElement("option");
+    opt.value = c.key;
+    opt.textContent = `${c.icon} ${c.label}`;
+    if ((it.category || "other") === c.key) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener("change", () => setCategory(it.id, select.value));
+
+  // delete singolo
   const del = document.createElement("button");
   del.type = "button";
   del.className = "del";
@@ -499,6 +502,7 @@ function renderItem(it) {
   li.appendChild(cb);
   li.appendChild(span);
   li.appendChild(qtyWrap);
+  li.appendChild(select);
   li.appendChild(del);
 
   return li;
