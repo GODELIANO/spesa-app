@@ -1,6 +1,6 @@
 // =========================
-// Spesa App - app.js
-// Features: delete, auto categories+grouping, qty +/- , share, wake lock
+// Spesa App - app.js (improved categorization)
+// Features: delete, auto categories+grouping, qty +/- , share, wake lock, offline
 // =========================
 
 // ---- DOM ----
@@ -20,33 +20,156 @@ if (!form || !input || !listEl || !clearDoneBtn || !clearAllBtn) {
 const STORAGE_KEY = "spesa_items_v2";
 
 // -------------------------
-// 4) Categorie automatiche
+// Text normalization + tokenization + light Italian stemming
+// -------------------------
+function normalizeText(s) {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")                  // separa accenti
+    .replace(/[\u0300-\u036f]/g, "")   // rimuove accenti
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // rimuove punteggiatura (unicode-safe)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenize(s) {
+  const t = normalizeText(s);
+  return t ? t.split(" ") : [];
+}
+
+// Stemmer leggero IT: mira alla spesa (non linguistica perfetta).
+// Obiettivo: ridurre plurali e varianti comuni a una radice stabile.
+function stemIt(word) {
+  let w = (word || "").toLowerCase();
+
+  // rimuovi apostrofi residui
+  w = w.replace(/'/g, "");
+
+  // normalizza articoli agganciati tipo "lacqua" da "l'acqua" (già ripulito in normalizeText)
+  // qui non facciamo split extra: lo gestiamo con tokenizzazione.
+
+  // tagli molto comuni (plurali)
+  // mele -> mel, pomodori -> pomodor, carote -> carot, banane -> banan
+  if (w.length > 3) w = w.replace(/(i|e)$/i, "");
+
+  // gestisci -che/-ghe (es. "pesche" -> "pesc" dopo taglio e -> "pesch" poi che->c)
+  w = w.replace(/che$/i, "c").replace(/ghe$/i, "g");
+
+  // riduzioni finali molto comuni (facoltative, conservative)
+  // es: "mozzarell" resta ok, "parmigian" ok.
+  return w;
+}
+
+function stemsFromText(text) {
+  return tokenize(text).map(stemIt).filter(Boolean);
+}
+
+// -------------------------
+// 4) Categorie automatiche: match su stems
 // -------------------------
 const CATEGORIES = [
-  { key: "produce",   label: "Frutta & Verdura", icon: "🥬", keywords: ["insalata","lattuga","pomodoro","zucchina","melanzana","patata","carota","cipolla","aglio","limone","banana","mela","pere","fragole","frutta","verdura","broccoli","spinaci","arancia","cetriolo"] },
-  { key: "meat",      label: "Carne",            icon: "🥩", keywords: ["carne","pollo","tacchino","manzo","vitello","maiale","bistecca","salsiccia","prosciutto","salame","wurstel","bacon","speck"] },
-  { key: "fish",      label: "Pesce",            icon: "🐟", keywords: ["pesce","tonno","salmone","merluzzo","gamberi","calamari","vongole","orata","branzino"] },
-  { key: "dairy",     label: "Latticini",        icon: "🥛", keywords: ["latte","yogurt","burro","panna","mozzarella","ricotta","parmigiano","grana","formaggio"] },
-  { key: "bakery",    label: "Pane & Forno",     icon: "🥖", keywords: ["pane","panini","focaccia","pizza","cracker","biscotti","cornetti","farina","lievito"] },
-  { key: "pantry",    label: "Dispensa",         icon: "🫙", keywords: ["pasta","riso","olio","aceto","sale","zucchero","caffè","caffe","tè","te","legumi","ceci","lenticchie","fagioli","sugo","passata","pelati","spezie"] },
-  { key: "frozen",    label: "Surgelati",        icon: "🧊", keywords: ["surgelati","gelato","frozen","piselli surgelati","bastoncini"] },
-  { key: "household", label: "Casa",             icon: "🧽", keywords: ["detersivo","sapone","candeggina","spugna","carta igienica","scottex","sacchetti","lavastoviglie","ammorbidente","pulitore","sgrassatore"] },
-  { key: "personal",  label: "Persona",          icon: "🧴", keywords: ["shampoo","bagnoschiuma","deodorante","dentifricio","spazzolino","rasoio","crema"] },
-  { key: "pet",       label: "Animali",          icon: "🐾", keywords: ["crocchette","cibo gatto","cibo cane","lettiera","snack cane","snack gatto"] },
-  { key: "other",     label: "Altro",            icon: "📝", keywords: [] },
+  {
+    key: "produce",
+    label: "Frutta & Verdura",
+    icon: "🥬",
+    stems: [
+      "insalat","lattug","rucol","pomodor","zucchin","melanzan","patat","carot","cipoll","agli",
+      "limon","banan","mel","per","fragol","kiw","ananas","aranc","mandarin","cetriol","peperon",
+      "broccol","cavolfior","spinac","fung","zener","zuccherin", "verdur", "frutt"
+    ],
+  },
+  {
+    key: "meat",
+    label: "Carne",
+    icon: "🥩",
+    stems: ["carn","poll","tacchin","manz","vitell","maial","bistec","salsicc","prosciutt","salam","wurstel","bacon","speck"],
+  },
+  {
+    key: "fish",
+    label: "Pesce",
+    icon: "🐟",
+    stems: ["pesc","tonn","salm","merluzz","gamber","calamar","vongol","orat","branzin","acciugh","sard"],
+  },
+  {
+    key: "dairy",
+    label: "Latticini",
+    icon: "🥛",
+    stems: ["latt","yogurt","burr","pann","mozzarell","ricott","parmigian","gran","formagg","latte","kefir"],
+  },
+  {
+    key: "bakery",
+    label: "Pane & Forno",
+    icon: "🥖",
+    stems: ["pan","panin","focacc","pizz","cracker","biscott","cornett","farin","lievit","grissin","brioch"],
+  },
+  {
+    key: "pantry",
+    label: "Dispensa",
+    icon: "🫙",
+    stems: ["past","ris","oli","acet","sal","zuccher","caffe","te","leggum","cec","lent","fagiol","sug","passat","pelat","spezi","tonn","conserv","brod"],
+  },
+  {
+    key: "frozen",
+    label: "Surgelati",
+    icon: "🧊",
+    stems: ["surgelat","gelat","frozen","pisell","bastonc","spinac"],
+  },
+  {
+    key: "household",
+    label: "Casa",
+    icon: "🧽",
+    stems: ["detersiv","sapon","candeggin","spugn","cart","igienic","scottex","sacchett","lavastovigl","ammorbident","pulitor","sgrassator","spazzol","guant"],
+  },
+  {
+    key: "personal",
+    label: "Persona",
+    icon: "🧴",
+    stems: ["shampoo","bagnoschium","deodorant","dentifric","spazzolin","raso","crem","sapone","cotton","assorbent"],
+  },
+  {
+    key: "pet",
+    label: "Animali",
+    icon: "🐾",
+    stems: ["crocchett","lettier","gatt","can","mangim","snack"],
+  },
+  {
+    key: "other",
+    label: "Altro",
+    icon: "📝",
+    stems: [],
+  },
 ];
-
-function inferCategory(text) {
-  const t = (text || "").toLowerCase();
-  for (const c of CATEGORIES) {
-    if (c.key === "other") continue;
-    if (c.keywords.some((k) => t.includes(k))) return c.key;
-  }
-  return "other";
-}
 
 function catMeta(key) {
   return CATEGORIES.find((c) => c.key === key) || CATEGORIES[CATEGORIES.length - 1];
+}
+
+// Matching più tollerante: exact OR prefix match (in entrambe le direzioni).
+function stemMatchesCategoryStem(tokenStem, categoryStem) {
+  if (!tokenStem || !categoryStem) return false;
+  if (tokenStem === categoryStem) return true;
+  // tolleranza: "pomodor" matcha "pomodor", ma anche "pomodoro" -> "pomodor"
+  if (tokenStem.startsWith(categoryStem)) return true;
+  if (categoryStem.startsWith(tokenStem) && tokenStem.length >= 4) return true;
+  return false;
+}
+
+function inferCategory(text) {
+  const stems = stemsFromText(text);
+
+  for (const c of CATEGORIES) {
+    if (c.key === "other") continue;
+    if (!c.stems || c.stems.length === 0) continue;
+
+    for (const s of stems) {
+      if (s.length < 3) continue;
+      // se QUALSIASI stem dell'item matcha QUALSIASI stem della categoria -> match
+      if (c.stems.some((cs) => stemMatchesCategoryStem(s, cs))) {
+        return c.key;
+      }
+    }
+  }
+  return "other";
 }
 
 // -------------------------
@@ -80,8 +203,7 @@ function loadItems() {
 }
 
 // -------------------------
-// 4) Raggruppamento per categoria
-// (QUI dopo CATEGORIES: fix dell'errore)
+// 4) Raggruppamento per categoria (ordine = CATEGORIES)
 // -------------------------
 function groupItems(arr) {
   const order = new Map(CATEGORIES.map((c, idx) => [c.key, idx]));
@@ -204,7 +326,7 @@ clearAllBtn.addEventListener("click", () => {
 });
 
 // -------------------------
-// 6) Condivisione (opzionale se bottone c'è)
+// 6) Condivisione (se bottone c'è)
 // -------------------------
 if (shareBtn) {
   shareBtn.addEventListener("click", async () => {
@@ -241,7 +363,7 @@ function buildShareText() {
 }
 
 // -------------------------
-// 7) Modalità negozio (Wake Lock) - opzionale se bottone c'è
+// 7) Modalità negozio (Wake Lock) - se bottone c'è
 // -------------------------
 let wakeLock = null;
 
