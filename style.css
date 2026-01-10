@@ -82,3 +82,62 @@ button {
 .actions button {
   flex: 1;
 }
+
+/* Header categoria */
+.cat-header {
+  margin: 14px 0 8px;
+  padding: 6px 4px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.cat-sep {
+  margin: 18px 0 8px;
+  padding: 6px 4px;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+/* Quantità */
+.qty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qty-btn {
+  border: 1px solid #e8e8e8;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.qty-val {
+  min-width: 20px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* Delete */
+.del {
+  border: 1px solid #e8e8e8;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* Bottoni azioni: 2 righe più comode */
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.actions button {
+  flex: 1;
+}
+
