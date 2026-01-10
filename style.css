@@ -141,3 +141,19 @@ button {
   flex: 1;
 }
 
+.cat-select {
+  padding: 8px 10px;
+  font-size: 14px;
+  border-radius: 12px;
+  border: 1px solid #e8e8e8;
+  background: #fff;
+}
+
+@media (max-width: 520px) {
+  .cat-select {
+    max-width: 140px;
+  }
+}
+
+
+
