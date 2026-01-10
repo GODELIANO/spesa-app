@@ -1,4 +1,6 @@
 // ---- DOM ----
+alert("app.js caricato");
+
 const form = document.getElementById("form");
 const input = document.getElementById("input");
 const listEl = document.getElementById("list");
