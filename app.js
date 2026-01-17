@@ -1,5 +1,5 @@
 // =========================
-// Spesa App - app.js (learning categories via aliases)
+// Spesa App - app.js
 // =========================
 
 // ---- DOM ----
@@ -231,6 +231,14 @@ function parseQty(raw) {
 }
 
 // -------------------------
+// ✅ Focus/scroll fix helpers
+// -------------------------
+// Evita che tocchi su checkbox/bottoni spostino il focus (e aprano tastiera su mobile)
+function preventFocus(e) {
+  e.preventDefault();
+}
+
+// -------------------------
 // State + boot
 // -------------------------
 let items = loadItems();
@@ -304,6 +312,9 @@ form.addEventListener("submit", (e) => {
   input.value = "";
   persist();
   render();
+
+  // ✅ Focus solo quando aggiungi un item (non quando spunti!)
+  input.focus();
 });
 
 clearDoneBtn.addEventListener("click", () => {
@@ -363,7 +374,10 @@ function buildShareText() {
 let wakeLock = null;
 
 if (keepAwakeBtn) {
-  keepAwakeBtn.addEventListener("click", async () => {
+  keepAwakeBtn.addEventListener("click", async (e) => {
+    // evita focus/scroll strani
+    preventFocus(e);
+
     const pressed = keepAwakeBtn.getAttribute("aria-pressed") === "true";
     if (pressed) await releaseWakeLock();
     else await requestWakeLock();
@@ -440,7 +454,8 @@ function render() {
     for (const it of done) listEl.appendChild(renderItem(it));
   }
 
-  input.focus();
+  // ❌ NIENTE input.focus() QUI
+  // Altrimenti quando spunti un elemento ti apre la tastiera e ti manda su.
 }
 
 function renderItem(it) {
@@ -450,6 +465,10 @@ function renderItem(it) {
   const cb = document.createElement("input");
   cb.type = "checkbox";
   cb.checked = it.done;
+
+  // ✅ evita focus/scroll strani su mobile quando tocchi la checkbox
+  cb.addEventListener("pointerdown", preventFocus);
+
   cb.addEventListener("change", () => toggleDone(it.id));
 
   const span = document.createElement("span");
@@ -464,6 +483,7 @@ function renderItem(it) {
   minus.type = "button";
   minus.className = "qty-btn";
   minus.textContent = "–";
+  minus.addEventListener("pointerdown", preventFocus);
   minus.addEventListener("click", () => changeQty(it.id, -1));
 
   const qty = document.createElement("span");
@@ -474,6 +494,7 @@ function renderItem(it) {
   plus.type = "button";
   plus.className = "qty-btn";
   plus.textContent = "+";
+  plus.addEventListener("pointerdown", preventFocus);
   plus.addEventListener("click", () => changeQty(it.id, +1));
 
   qtyWrap.appendChild(minus);
@@ -483,6 +504,8 @@ function renderItem(it) {
   // ✅ menu categoria (manuale -> salva alias)
   const select = document.createElement("select");
   select.className = "cat-select";
+  select.addEventListener("pointerdown", preventFocus); // opzionale, ma aiuta su mobile
+
   for (const c of CATEGORIES) {
     const opt = document.createElement("option");
     opt.value = c.key;
@@ -497,6 +520,7 @@ function renderItem(it) {
   del.type = "button";
   del.className = "del";
   del.textContent = "×";
+  del.addEventListener("pointerdown", preventFocus);
   del.addEventListener("click", () => removeItem(it.id));
 
   li.appendChild(cb);
