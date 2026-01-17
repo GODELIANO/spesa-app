@@ -1,5 +1,5 @@
 // =========================
-// Spesa App - app.js
+// Spesa App - app.js (learning categories via aliases)
 // =========================
 
 // ---- DOM ----
@@ -231,11 +231,30 @@ function parseQty(raw) {
 }
 
 // -------------------------
-// ✅ Focus/scroll fix helpers
+// ✅ SHOP MODE FIX
 // -------------------------
-// Evita che tocchi su checkbox/bottoni spostino il focus (e aprano tastiera su mobile)
-function preventFocus(e) {
-  e.preventDefault();
+// 1) Non mettere MAI focus sull'input durante i rerender.
+// 2) Quando spunti (o fai azioni in lista), preserva lo scroll.
+// 3) (extra) blura l'elemento attivo per evitare "scroll-to-focus" del browser.
+function getScrollTop() {
+  // se la tua lista è in un container scrollabile, cambia qui e usa listEl.scrollTop
+  return window.scrollY || document.documentElement.scrollTop || 0;
+}
+
+function setScrollTop(y) {
+  window.scrollTo(0, y);
+}
+
+function blurActive() {
+  const ae = document.activeElement;
+  if (ae && ae !== document.body && typeof ae.blur === "function") ae.blur();
+}
+
+function rerenderPreservingScroll() {
+  const y = getScrollTop();
+  blurActive();
+  render();
+  requestAnimationFrame(() => setScrollTop(y));
 }
 
 // -------------------------
@@ -250,7 +269,7 @@ render();
 function removeItem(id) {
   items = items.filter((i) => i.id !== id);
   persist();
-  render();
+  rerenderPreservingScroll();
 }
 
 function toggleDone(id) {
@@ -258,7 +277,7 @@ function toggleDone(id) {
   if (!it) return;
   it.done = !it.done;
   persist();
-  render();
+  rerenderPreservingScroll();
 }
 
 function changeQty(id, delta) {
@@ -266,7 +285,7 @@ function changeQty(id, delta) {
   if (!it) return;
   it.qty = clampQty((it.qty ?? 1) + delta);
   persist();
-  render();
+  rerenderPreservingScroll();
 }
 
 // Cambia categoria manualmente e “impara”
@@ -276,7 +295,7 @@ function setCategory(id, categoryKey) {
   it.category = categoryKey;
   learnAlias(it.text, categoryKey);
   persist();
-  render();
+  rerenderPreservingScroll();
 }
 
 // Ricategorizza tutto (usa alias -> regole)
@@ -286,7 +305,7 @@ function recategorizeAll() {
     category: inferCategory(it.text),
   }));
   persist();
-  render();
+  rerenderPreservingScroll();
 }
 
 // -------------------------
@@ -313,20 +332,23 @@ form.addEventListener("submit", (e) => {
   persist();
   render();
 
-  // ✅ Focus solo quando aggiungi un item (non quando spunti!)
+  // ✅ Focus solo quando aggiungi un elemento (qui ha senso)
   input.focus();
 });
 
 clearDoneBtn.addEventListener("click", () => {
   items = items.filter((i) => !i.done);
   persist();
-  render();
+  // qui può essere ok restare dove sei, quindi preserviamo
+  rerenderPreservingScroll();
 });
 
 clearAllBtn.addEventListener("click", () => {
   items = [];
   persist();
+  // qui può avere senso tornare su: se vuoi preservare comunque, usa rerenderPreservingScroll()
   render();
+  input.focus();
 });
 
 if (recatAllBtn) {
@@ -374,10 +396,7 @@ function buildShareText() {
 let wakeLock = null;
 
 if (keepAwakeBtn) {
-  keepAwakeBtn.addEventListener("click", async (e) => {
-    // evita focus/scroll strani
-    preventFocus(e);
-
+  keepAwakeBtn.addEventListener("click", async () => {
     const pressed = keepAwakeBtn.getAttribute("aria-pressed") === "true";
     if (pressed) await releaseWakeLock();
     else await requestWakeLock();
@@ -454,20 +473,21 @@ function render() {
     for (const it of done) listEl.appendChild(renderItem(it));
   }
 
-  // ❌ NIENTE input.focus() QUI
-  // Altrimenti quando spunti un elemento ti apre la tastiera e ti manda su.
+  // ❌ NON FARE input.focus() QUI
+  // È questo che ti riportava sempre in alto dopo ogni spunta.
 }
 
 function renderItem(it) {
   const li = document.createElement("li");
   li.className = "item" + (it.done ? " done" : "");
+  li.dataset.id = it.id;
 
   const cb = document.createElement("input");
   cb.type = "checkbox";
   cb.checked = it.done;
 
-  // ✅ evita focus/scroll strani su mobile quando tocchi la checkbox
-  cb.addEventListener("pointerdown", preventFocus);
+  // extra: evita che alcuni browser provino a gestire focus in modo aggressivo
+  cb.addEventListener("pointerdown", (e) => e.preventDefault());
 
   cb.addEventListener("change", () => toggleDone(it.id));
 
@@ -483,7 +503,7 @@ function renderItem(it) {
   minus.type = "button";
   minus.className = "qty-btn";
   minus.textContent = "–";
-  minus.addEventListener("pointerdown", preventFocus);
+  minus.addEventListener("pointerdown", (e) => e.preventDefault());
   minus.addEventListener("click", () => changeQty(it.id, -1));
 
   const qty = document.createElement("span");
@@ -494,7 +514,7 @@ function renderItem(it) {
   plus.type = "button";
   plus.className = "qty-btn";
   plus.textContent = "+";
-  plus.addEventListener("pointerdown", preventFocus);
+  plus.addEventListener("pointerdown", (e) => e.preventDefault());
   plus.addEventListener("click", () => changeQty(it.id, +1));
 
   qtyWrap.appendChild(minus);
@@ -504,7 +524,7 @@ function renderItem(it) {
   // ✅ menu categoria (manuale -> salva alias)
   const select = document.createElement("select");
   select.className = "cat-select";
-  select.addEventListener("pointerdown", preventFocus); // opzionale, ma aiuta su mobile
+  select.addEventListener("pointerdown", (e) => e.preventDefault());
 
   for (const c of CATEGORIES) {
     const opt = document.createElement("option");
@@ -520,7 +540,7 @@ function renderItem(it) {
   del.type = "button";
   del.className = "del";
   del.textContent = "×";
-  del.addEventListener("pointerdown", preventFocus);
+  del.addEventListener("pointerdown", (e) => e.preventDefault());
   del.addEventListener("click", () => removeItem(it.id));
 
   li.appendChild(cb);
